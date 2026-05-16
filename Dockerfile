@@ -5,11 +5,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     chromium \
     ca-certificates \
+    tzdata \
+    && ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime \
+    && echo "America/Sao_Paulo" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 # Install hyperframes globally
 RUN npm install -g hyperframes
 
+ENV TZ=America/Sao_Paulo
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 

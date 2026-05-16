@@ -1,6 +1,10 @@
 name: afhub-local
 
+x-tz: &tz
+  TZ: America/Sao_Paulo
+
 x-supabase-keys: &supabase-keys
+  TZ: America/Sao_Paulo
   JWT_SECRET: afhub-local-jwt-secret-change-only-for-dev-2026
   ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaHViLWxvY2FsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMDAwMDAsImV4cCI6NDA3MDkwODgwMH0.lak2dIWNDCkdjH1FNokuu5yHfEPZeeCYzQNN8Zsoxi4}
   SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaHViLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDAwMDAwMCwiZXhwIjo0MDcwOTA4ODAwfQ.MpKaamg6se5t-re0ShV9T95_gyhnOkIlToK0xE_CYTg}
@@ -22,6 +26,7 @@ services:
     ports:
       - "5432:5432"
     environment:
+      <<: *tz
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
       JWT_SECRET: afhub-local-jwt-secret-change-only-for-dev-2026
@@ -81,6 +86,7 @@ services:
       supabase-db:
         condition: service_healthy
     environment:
+      <<: *tz
       PGRST_DB_URI: postgres://authenticator:postgres@supabase-db:5432/postgres
       PGRST_DB_SCHEMAS: public,storage,graphql_public
       PGRST_DB_ANON_ROLE: anon
@@ -125,6 +131,7 @@ services:
       supabase-db:
         condition: service_healthy
     environment:
+      <<: *tz
       PG_META_PORT: 8080
       PG_META_DB_HOST: supabase-db
       PG_META_DB_PORT: 5432
@@ -142,6 +149,7 @@ services:
     ports:
       - "54323:3000"
     environment:
+      <<: *tz
       HOSTNAME: 0.0.0.0
       STUDIO_PG_META_URL: http://meta:8080
       POSTGRES_PASSWORD: postgres
@@ -167,6 +175,7 @@ services:
     volumes:
       - ./supabase/local/kong.yml:/usr/local/kong/declarative/kong.yml:ro
     environment:
+      <<: *tz
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
       KONG_DNS_ORDER: LAST,A,CNAME
