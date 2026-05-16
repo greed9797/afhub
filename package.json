@@ -4,7 +4,8 @@
   "private": true,
   "version": "1.0.1",
   "workspaces": [
-    "packages/studio"
+    "packages/studio",
+    "affiliate-engine"
   ],
   "scripts": {
     "dev": "next dev",
@@ -17,6 +18,13 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:report": "playwright show-report",
     "build:studio": "npm run build -w studio",
+    "affiliate:dev": "npm run dev -w affiliate-engine",
+    "affiliate:build": "npm run build -w affiliate-engine",
+    "affiliate:test": "npm run test -w affiliate-engine",
+    "affiliate:start": "npm run start -w affiliate-engine",
+    "affiliate:worker:affiliate": "npm run worker:affiliate -w affiliate-engine",
+    "affiliate:worker:video": "npm run worker:video -w affiliate-engine",
+    "affiliate:worker:publisher": "npm run worker:publisher -w affiliate-engine",
     "build:packages": "npm run build:studio",
     "setup": "npm install && npm run build:packages",
     "vite:dev": "vite",
@@ -111,6 +119,9 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/vite": "^4.1.18",
     "autoprefixer": "^10.4.24",
@@ -120,6 +131,7 @@
     "eslint-config-next": "^15.0.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.19",
+    "typescript": "^5.9.3",
     "vite": "^5.4.0"
   },
   "main": "electron/main.js"
