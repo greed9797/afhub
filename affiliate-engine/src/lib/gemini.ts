@@ -76,8 +76,17 @@ export async function generatePublicationContent(params: {
   ].join('\n');
 
   const raw = await generateText(prompt);
-  const json = raw.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
-  const parsed = JSON.parse(json) as { title?: string; description?: string; hashtags?: string[] };
+  const json = raw.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/g, '').trim();
+  let parsed: { title?: string; description?: string; hashtags?: string[] };
+  try {
+    parsed = JSON.parse(json) as { title?: string; description?: string; hashtags?: string[] };
+  } catch {
+    parsed = {
+      title: params.productName,
+      description: params.platform === 'instagram' ? 'Link na bio' : params.affiliateLink,
+      hashtags: ['afiliados', 'oferta', params.niche].filter(Boolean),
+    };
+  }
   return {
     title: String(parsed.title ?? params.productName).slice(0, 150),
     description: String(parsed.description ?? '').slice(0, 2200),

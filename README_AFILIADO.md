@@ -6,9 +6,239 @@ Sistema de automação de afiliados adicionado em módulos separados do `package
 
 - `affiliate-engine/`: API Hono, OAuth, connectors, BullMQ workers, clientes Gemini/Veo e publishers.
 - `app/dashboard/`: dashboard Next.js para contas, nichos, scanner, aprovações, produtos, vídeos, publicações e settings.
-- `supabase/migrations/001_initial_schema.sql`: schema base com RLS habilitado, API readiness e buckets públicos `affiliate-products` e `affiliate-videos`.
+- `docker-compose.dev.yml`: stack local com Redis, Postgres/Supabase, Auth, REST, Storage, Studio e Kong.
+- `supabase/local/`: configuração local de roles, helpers Auth e gateway Kong para rodar sem Supabase CLI.
+- `supabase/migrations/001_initial_schema.sql`: schema base com RLS habilitado e buckets públicos `affiliate-products` e `affiliate-videos`.
 - `supabase/migrations/002_official_api_readiness.sql`: atualização incremental para contas/candidatos com capabilities, fonte da API e método de link.
-- `app/api/affiliate/[[...path]]/route.ts`: proxy server-side que injeta `INTERNAL_API_KEY` sem expor segredo no browser.
+- `supabase/migrations/003_helpers.sql`: função `select_least_loaded_account` e índices operacionais de filas/publicações.
+- `supabase/migrations/20260514000000_affiliate_analytics.sql`: eventos, pedidos, importações oficiais e índices de métricas.
+- `app/api/affiliate/[[...path]]/route.js`: proxy server-side que injeta `INTERNAL_API_KEY` sem expor segredo no browser.
+
+## Mapa do fluxo atual
+
+### Camadas em execução
+
+1. **Dashboard Next.js (`app/dashboard`)**
+   - Interface operacional em `http://localhost:3000/dashboard`.
+   - Consome somente `/api/affiliate/*` pelo proxy Next.
+   - Não chama Supabase direto no browser.
+   - Links do menu usam `prefetch={false}` para evitar compilação pesada de todas as páginas durante teste local em `next dev`.
+
+2. **Proxy Next (`app/api/affiliate/[[...path]]/route.js`)**
+   - Recebe chamadas do dashboard em `/api/affiliate/*`.
+   - Repassa para a engine em `NEXT_PUBLIC_API_URL`/`PUBLIC_API_URL`/`AFFILIATE_ENGINE_URL`, normalmente `http://localhost:3001`.
+   - Injeta `Authorization: Bearer INTERNAL_API_KEY` server-side.
+   - Em produção não deve mascarar engine offline; erro esperado é `502` com mensagem clara.
+   - Em desenvolvimento pode responder fallback/mock apenas quando permitido por `AFFILIATE_ENGINE_MOCK`.
+
+3. **Affiliate Engine Hono (`affiliate-engine/src`)**
+   - Roda em `http://localhost:3001`.
+   - Expõe `/health`, `/api/health`, `/api/*` e o redirect público `/api/r/:affiliatedProductId`.
+   - Usa Supabase com service role server-side.
+   - Usa Redis TCP para BullMQ.
+
+4. **Supabase/Postgres**
+   - Local: API `http://localhost:54321`, Studio `http://localhost:54323`, Postgres `localhost:5432`.
+   - Tabelas principais:
+     - `affiliate_accounts`: contas afiliadas, OAuth, status, capabilities e canais.
+     - `niches`: nichos e filtros comerciais.
+     - `product_candidates`: produtos encontrados pelo scanner e fila de aprovação.
+     - `affiliated_products`: produtos aprovados com link afiliado real.
+     - `video_jobs`: jobs de vídeo e resultado do Veo.
+     - `publications`: calendário/status de posts.
+     - `affiliate_events`: impressões/cliques próprios.
+     - `affiliate_orders`: pedidos/GMV/comissão importados ou oficiais.
+     - `affiliate_metric_imports`: auditoria de importações de métricas.
+
+5. **Redis/BullMQ**
+   - Local: `redis://localhost:6379`.
+   - Filas:
+     - `affiliate-queue`: cria produto afiliado depois da aprovação.
+     - `video-generation-queue`: gera vídeos `product` e `lifestyle`.
+     - `publication-queue`: agenda e publica conteúdo.
+
+### Jornada principal ponta a ponta
+
+1. **Conta**
+   - Operador cria conta em `Dashboard > Contas`.
+   - API: `POST /api/affiliate/accounts`.
+   - OAuth/readiness:
+     - `GET /api/affiliate/accounts/:id/auth/url`
+     - `GET /api/affiliate/settings/readiness`
+   - Conta só deve operar de verdade quando `api_access_status="approved"` e capability necessária estiver ativa.
+
+2. **Nicho**
+   - Operador cadastra nicho e filtros em `Dashboard > Nichos`.
+   - API:
+     - `GET /api/affiliate/niches`
+     - `POST /api/affiliate/niches`
+     - `PATCH /api/affiliate/niches/:id`
+     - `DELETE /api/affiliate/niches/:id`
+
+3. **Scanner**
+   - Operador inicia scan em `Dashboard > Scanner`.
+   - API:
+     - `POST /api/affiliate/scanner/run`
+     - `GET /api/affiliate/scanner/status/:jobId`
+     - `GET /api/affiliate/scanner/results?limit=50`
+   - Engine busca produtos via connectors Mercado Livre, Shopee e TikTok Shop conforme credenciais/capabilities.
+   - Resultados entram em `product_candidates` com status `pending`, score, dados de comissão/vendas/avaliação e fonte.
+
+4. **Aprovação**
+   - Operador aprova/rejeita em `Dashboard > Aprovações`.
+   - API:
+     - `GET /api/affiliate/approvals`
+     - `POST /api/affiliate/approvals/:id/approve`
+     - `POST /api/affiliate/approvals/:id/reject`
+     - `POST /api/affiliate/approvals/batch`
+   - Telegram também pode aprovar/rejeitar via `POST /api/affiliate/webhooks/telegram`.
+   - Aprovação enfileira job em `affiliate-queue`.
+
+5. **Afiliação**
+   - Worker `affiliate` lê `product_candidates`.
+   - Seleciona conta por `select_least_loaded_account(platform, niche_id)`.
+   - Gera link afiliado pelo connector da plataforma.
+   - Baixa imagens para o bucket `affiliate-products`.
+   - Cria `affiliated_products`.
+   - Agenda dois vídeos:
+     - tipo `product`
+     - tipo `lifestyle`
+
+6. **Vídeo**
+   - Worker `video-generation` lê `video-generation-queue`.
+   - Gemini gera prompt/copy base.
+   - Vertex AI/Veo gera vídeo vertical `9:16`.
+   - Vídeo final sobe para bucket `affiliate-videos`.
+   - Registro em `video_jobs` muda para `done` ou `failed`.
+   - Ao concluir, agenda publicação em `publication-queue`.
+
+7. **Publicação**
+   - Worker `publisher` cria registros em `publications`.
+   - Slots padrão: `11:00` e `19:00` BRT.
+   - Regra operacional: evitar menos de 4h entre posts da mesma conta/plataforma.
+   - `publish-cron` varre publicações `scheduled` vencidas e envia para TikTok/YouTube/Instagram quando credenciais/canais estiverem configurados.
+   - Retry manual:
+     - `POST /api/affiliate/publications/:id/retry`
+     - `POST /api/affiliate/videos/:id/retry`
+
+8. **Tracking de clique**
+   - Publicações devem usar link rastreável interno.
+   - Rota pública: `GET /api/r/:affiliatedProductId`.
+   - A rota:
+     - valida produto afiliado ativo;
+     - registra evento `click` em `affiliate_events`;
+     - preserva `utm_source`, `utm_medium`, `utm_campaign` e `publication_id`;
+     - redireciona para `affiliate_link` real.
+   - Impressões são suportadas por `POST /api/affiliate/analytics/events`, mas só devem ser enviadas quando houver fonte confiável de impressão.
+
+9. **Pedidos, GMV e comissão**
+   - Entram por `POST /api/affiliate/analytics/import`.
+   - Suporta import manual JSON/CSV normalizado e estrutura pronta para relatórios oficiais.
+   - Idempotência por `platform_order_id`.
+   - Dados gravados em `affiliate_orders`.
+
+10. **Analytics**
+    - Dashboard completo: `Dashboard > Analytics` (`/dashboard/analytics`).
+    - API: `GET /api/affiliate/analytics/summary`.
+    - Filtros:
+      - `account_id=all|uuid`
+      - `platform=all|mercadolivre|shopee|tiktokshop`
+      - `from=YYYY-MM-DD`
+      - `to=YYYY-MM-DD`
+    - Métricas:
+      - `impressions`: eventos `impression`
+      - `clicks`: eventos `click`
+      - `orders`: pedidos válidos
+      - `gmv`: soma de `gross_amount`
+      - `commission`: soma de `commission_amount`
+      - `ctr`: `clicks / impressions * 100`
+      - `conversionRate`: `orders / clicks * 100`
+      - `averageOrderValue`: `gmv / orders`
+      - `epc`: `commission / clicks`
+    - Retorno inclui totais, `byAccount`, `byDay` e `topProducts`.
+
+### Rotas atuais da engine
+
+| Área | Rotas principais | Uso |
+| --- | --- | --- |
+| Health | `GET /health`, `GET /api/health` | Smoke direto e via proxy |
+| Contas | `GET/POST /api/accounts`, `GET/PATCH/DELETE /api/accounts/:id`, `GET /api/accounts/:id/auth/url`, `GET /api/accounts/:id/auth/callback`, `POST /api/accounts/:id/auth/refresh` | Gestão e OAuth |
+| Nichos | `GET/POST /api/niches`, `PATCH/DELETE /api/niches/:id` | Filtros comerciais |
+| Scanner | `POST /api/scanner/run`, `GET /api/scanner/status/:jobId`, `GET /api/scanner/results` | Busca e scoring |
+| Aprovações | `GET /api/approvals`, `POST /api/approvals/:id/approve`, `POST /api/approvals/:id/reject`, `POST /api/approvals/batch` | Fila humana |
+| Produtos | `GET /api/products/candidates`, `GET /api/products`, `GET /api/products/:id` | Candidatos e afiliados |
+| Vídeos | `GET /api/videos`, `POST /api/videos/:id/retry` | Status e retentativa |
+| Publicações | `GET /api/publications`, `GET /api/publications/calendar`, `POST /api/publications/:id/retry` | Agenda e posts |
+| Settings | `GET /api/settings/env`, `GET /api/settings/readiness`, `POST /api/settings/telegram/test` | Diagnóstico operacional |
+| Analytics | `GET /api/analytics/summary`, `POST /api/analytics/events`, `POST /api/analytics/import` | Métricas |
+| Tracking público | `GET /api/r/:affiliatedProductId` | Clique e redirect |
+| Webhooks | `POST /api/webhooks/telegram` | Callback Telegram |
+
+No dashboard, essas rotas são acessadas como `/api/affiliate/...` pelo proxy. Exemplo: engine `GET /api/settings/readiness` vira Next `GET /api/affiliate/settings/readiness`.
+
+### Páginas atuais do dashboard
+
+| Página | Rota | Dados principais |
+| --- | --- | --- |
+| Overview | `/dashboard` | contas, aprovações recentes, vídeos, publicações, produtos e resumo analytics 30 dias |
+| Analytics | `/dashboard/analytics` | GMV, CTR, conversão, pedidos, cliques, comissão, ticket médio, tabela por conta, série diária e ranking |
+| Contas | `/dashboard/accounts` | CRUD de contas, conectar OAuth, ativar/suspender |
+| Nichos | `/dashboard/niches` | CRUD de nichos e filtros |
+| Scanner | `/dashboard/scanner` | iniciar scan, status e últimos resultados |
+| Aprovações | `/dashboard/approvals` | aprovar/rejeitar individual ou lote |
+| Produtos | `/dashboard/products` | produtos afiliados/candidatos |
+| Vídeos | `/dashboard/videos` | jobs, preview e retry |
+| Publicações | `/dashboard/publications` | calendário/lista, status e retry |
+| Settings | `/dashboard/settings` | env checklist, readiness e teste Telegram |
+
+### Estado funcional local
+
+Com `npm run local:infra`, `npm run local:migrate`, `npm run affiliate:dev` e `npm run dev`:
+
+- Banco local, Auth, REST, Storage, Studio, Kong e Redis sobem via Docker.
+- Dashboard abre em `http://localhost:3000/dashboard`.
+- Engine responde em `http://localhost:3001`.
+- Proxy `/api/affiliate/*` responde sem 404.
+- Analytics retorna zeros quando não há eventos/pedidos.
+- Readiness informa o que está bloqueado por credenciais reais.
+
+O que **não** fica 100% funcional sem credencial real:
+
+- Scanner real de ML/Shopee/TikTok Shop.
+- OAuth real de contas.
+- Geração real Gemini/Veo.
+- Publicação real em TikTok/YouTube/Instagram.
+- Telegram real.
+- Relatórios oficiais de pedidos/GMV.
+
+### Critério de pronto para QA
+
+Antes de validar uma branch:
+
+```bash
+npm run affiliate:test
+npm test
+npm run build
+npm run local:infra
+npm run local:migrate
+```
+
+Com engine e Next rodando:
+
+```bash
+curl http://localhost:3001/health
+curl http://localhost:3000/api/affiliate/health
+curl http://localhost:3000/api/affiliate/accounts
+curl http://localhost:3000/api/affiliate/settings/readiness
+curl 'http://localhost:3000/api/affiliate/analytics/summary?from=2026-04-17&to=2026-05-16&account_id=all&platform=all'
+```
+
+Resultado esperado em ambiente local sem credenciais:
+
+- Health direto e proxy: `200`.
+- Accounts: `200` com lista vazia ou contas locais.
+- Readiness: `200` com plataformas marcadas como `missing` até preencher envs reais.
+- Analytics: `200` com métricas zeradas se não houver eventos/pedidos.
 
 ## Setup local
 
@@ -18,9 +248,35 @@ Sistema de automação de afiliados adicionado em módulos separados do `package
 npm install
 ```
 
-2. Configure `.env` na raiz e `affiliate-engine/.env` a partir dos exemplos.
+2. Para rodar 100% local sem Supabase CLI/Upstash, suba a infra Docker:
 
-3. Aplique a migration no Supabase:
+```bash
+npm run local:infra
+```
+
+Isso sobe:
+
+- Supabase API local em `http://localhost:54321`
+- Supabase Studio em `http://localhost:54323`
+- Postgres em `localhost:5432`
+- Redis em `localhost:6379`
+
+O compose local usa chaves JWT fixas de desenvolvimento. Copie os templates:
+
+```bash
+cp .env.local.example .env.local
+cp affiliate-engine/.env.local.example affiliate-engine/.env
+```
+
+3. Aplique as migrations do AfiliadoOS sem Supabase CLI:
+
+```bash
+npm run local:migrate
+```
+
+Por padrão esse comando aplica só o stack de afiliados: `001_initial_schema.sql`, `002_official_api_readiness.sql`, `003_helpers.sql` e `20260514000000_affiliate_analytics.sql`. Para tentar aplicar todo o monorepo local, use `MIGRATION_SCOPE=all npm run local:migrate`.
+
+Se preferir Supabase CLI, o fluxo antigo continua funcionando:
 
 ```bash
 supabase db push
@@ -128,6 +384,26 @@ curl -s http://localhost:3000/api/affiliate/products
 curl -s http://localhost:3000/api/affiliate/publications
 curl -s 'http://localhost:3000/api/affiliate/analytics/summary?from=2026-04-01&to=2026-04-30&account_id=all&platform=all'
 ```
+
+### Smoke 100% local sem cloud
+
+```bash
+npm run local:infra
+npm run local:migrate
+npm run affiliate:dev
+npm run dev
+
+curl http://localhost:3001/health
+curl http://localhost:3000/api/affiliate/health
+curl http://localhost:3000/api/affiliate/settings/readiness
+```
+
+Serviços que continuam exigindo credencial real mesmo localmente:
+
+- Vertex AI / Veo 3 (`GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CLOUD_PROJECT`)
+- Gemini (`GOOGLE_AI_API_KEY`)
+- APIs de afiliado ML/Shopee/TikTok Shop
+- Telegram real, caso queira callback/notificação fora de teste
 
 ### Próximos passos práticos (após conectores oficiais)
 

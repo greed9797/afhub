@@ -36,7 +36,11 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
     <div className="h-screen overflow-y-auto bg-app-bg text-white">
       <header className="sticky top-0 z-30 border-b border-white/10 bg-black/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
-          <Link href="/dashboard" className="flex items-center gap-2 text-sm font-black uppercase tracking-normal">
+          <Link
+            href="/dashboard"
+            prefetch={false}
+            className="flex items-center gap-2 text-sm font-black uppercase tracking-normal"
+          >
             <Storefront size={22} weight="fill" className="text-primary" />
             AfiliadoOS
           </Link>
@@ -48,6 +52,7 @@ export function DashboardChrome({ children }: { children: React.ReactNode }) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch={false}
                   className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs transition ${
                     active ? 'bg-primary text-white' : 'text-zinc-400 hover:bg-white/5 hover:text-white'
                   }`}

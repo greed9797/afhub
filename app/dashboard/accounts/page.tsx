@@ -11,6 +11,8 @@ type Account = {
   cpf_cnpj: string;
   platform: 'mercadolivre' | 'shopee' | 'tiktokshop';
   status: string;
+  api_access_status?: string;
+  capabilities?: Record<string, boolean>;
   channel_ids?: Record<string, string>;
 };
 
@@ -86,6 +88,16 @@ export default function AccountsPage() {
               </div>
               <div className="mt-3">
                 <PlatformBadge value={account.platform} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                <span className={`rounded-full px-2 py-1 ${account.api_access_status === 'approved' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}`}>
+                  API {account.api_access_status ?? 'missing'}
+                </span>
+                {['can_scan', 'can_affiliate', 'can_report'].map((key) => (
+                  <span key={key} className={`rounded-full px-2 py-1 ${account.capabilities?.[key] ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-zinc-400'}`}>
+                    {key.replace('can_', '')}
+                  </span>
+                ))}
               </div>
               <div className="mt-4 grid gap-2">
                 {['tiktok', 'youtube', 'instagram', 'instagram_user_id'].map((channel) => (

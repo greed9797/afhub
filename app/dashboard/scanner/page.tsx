@@ -76,15 +76,23 @@ export default function ScannerPage() {
       <Card className="mb-5">
         <div className="mb-4 flex flex-wrap gap-3">
           {niches.filter((niche) => niche.active).map((niche) => (
-            <label key={niche.id} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm">
+            <label key={niche.id} className="flex items-start gap-2 rounded-lg border border-white/10 px-3 py-2 text-sm">
               <input
+                className="mt-1"
                 type="checkbox"
                 checked={selected.includes(niche.id)}
                 onChange={(event) =>
                   setSelected((current) => (event.target.checked ? [...current, niche.id] : current.filter((id) => id !== niche.id)))
                 }
               />
-              {niche.nome}
+              <span>
+                <span className="block font-medium">{niche.nome}</span>
+                {niche.filters ? (
+                  <span className="mt-1 block text-[11px] text-zinc-500">
+                    Comissão {niche.filters.comissao_min ?? 5}% · Vendas {niche.filters.vendas_min ?? 100} · Avaliação {niche.filters.avaliacao_min ?? 4}
+                  </span>
+                ) : null}
+              </span>
             </label>
           ))}
         </div>

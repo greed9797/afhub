@@ -1,7 +1,7 @@
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { requireEnv } from '../lib/env.js';
 import { getSupabase } from '../lib/supabase.js';
-import type { AffiliatePlatform, OAuthTokens } from '../types.js';
+import type { AffiliateAccount, AffiliatePlatform, OAuthTokens } from '../types.js';
 import { mercadoLivreOAuthUrl } from '../connectors/mercadolivre.js';
 import { shopeeOAuthUrl } from '../connectors/shopee.js';
 import { tiktokShopOAuthUrl } from '../connectors/tiktokshop.js';
@@ -56,12 +56,26 @@ export async function refreshToken(platform: AffiliatePlatform, accountId: strin
   return { ...current, ...tokens };
 }
 
+export async function refreshTokenIfNeeded(account: Pick<AffiliateAccount, 'id' | 'platform' | 'oauth_tokens_encrypted'>): Promise<string> {
+  if (!account.oauth_tokens_encrypted) {
+    throw new Error(`Account ${account.id} has no OAuth tokens.`);
+  }
+  const tokens = JSON.parse(decrypt(account.oauth_tokens_encrypted)) as OAuthTokens;
+  const expiresAt = Number(tokens.expires_at ?? 0);
+  const bufferSeconds = account.platform === 'tiktokshop' ? 30 * 60 : 10 * 60;
+  if (!expiresAt || Math.floor(Date.now() / 1000) + bufferSeconds < expiresAt) {
+    return tokens.access_token;
+  }
+  const refreshed = await refreshToken(account.platform, account.id);
+  return refreshed.access_token;
+}
+
 export function startOAuthRefreshScheduler(): NodeJS.Timeout {
   return setInterval(() => {
     refreshExpiringTokens().catch((error) => {
       console.error('[oauth] token refresh sweep failed:', error instanceof Error ? error.message : error);
     });
-  }, 60 * 60 * 1000);
+  }, 30 * 60 * 1000);
 }
 
 async function refreshExpiringTokens(): Promise<void> {
@@ -71,15 +85,13 @@ async function refreshExpiringTokens(): Promise<void> {
     .eq('status', 'active');
 
   if (error) throw error;
-  const now = Math.floor(Date.now() / 1000);
-
   for (const account of data ?? []) {
     if (!account.oauth_tokens_encrypted) continue;
-    const tokens = JSON.parse(decrypt(account.oauth_tokens_encrypted)) as OAuthTokens;
-    const expiresAt = Number(tokens.expires_at ?? 0);
-    if (!expiresAt || expiresAt - now > 90 * 60) continue;
-
-    await refreshToken(account.platform as AffiliatePlatform, account.id);
+    await refreshTokenIfNeeded({
+      id: account.id,
+      platform: account.platform as AffiliatePlatform,
+      oauth_tokens_encrypted: account.oauth_tokens_encrypted,
+    });
   }
 }
 
