@@ -1,0 +1,184 @@
+name: afhub-local
+
+x-supabase-keys: &supabase-keys
+  JWT_SECRET: afhub-local-jwt-secret-change-only-for-dev-2026
+  ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaHViLWxvY2FsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMDAwMDAsImV4cCI6NDA3MDkwODgwMH0.lak2dIWNDCkdjH1FNokuu5yHfEPZeeCYzQNN8Zsoxi4}
+  SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaHViLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDAwMDAwMCwiZXhwIjo0MDcwOTA4ODAwfQ.MpKaamg6se5t-re0ShV9T95_gyhnOkIlToK0xE_CYTg}
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  supabase-db:
+    image: supabase/postgres:15.1.0.147
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      JWT_SECRET: afhub-local-jwt-secret-change-only-for-dev-2026
+      JWT_EXP: 315360000
+    volumes:
+      - supabase_data:/var/lib/postgresql/data
+      - ./supabase/local/init:/docker-entrypoint-initdb.d/init-scripts:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  auth:
+    image: supabase/gotrue:v2.186.0
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      <<: *supabase-keys
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:54321/auth/v1
+      GOTRUE_SITE_URL: http://localhost:3000
+      GOTRUE_URI_ALLOW_LIST: http://localhost:3000,http://localhost:3001
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:postgres@supabase-db:5432/postgres
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: 315360000
+      GOTRUE_JWT_SECRET: afhub-local-jwt-secret-change-only-for-dev-2026
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_SMTP_ADMIN_EMAIL: admin@afhub.local
+      GOTRUE_SMTP_HOST: inbucket
+      GOTRUE_SMTP_PORT: 2500
+      GOTRUE_SMTP_USER: ""
+      GOTRUE_SMTP_PASS: ""
+      GOTRUE_SMTP_SENDER_NAME: AFHUB Local
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  inbucket:
+    image: inbucket/inbucket:3.0.4
+    ports:
+      - "54324:9000"
+      - "54325:2500"
+
+  rest:
+    image: postgrest/postgrest:v14.8
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:postgres@supabase-db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_JWT_SECRET: afhub-local-jwt-secret-change-only-for-dev-2026
+      PGRST_APP_SETTINGS_JWT_SECRET: afhub-local-jwt-secret-change-only-for-dev-2026
+      PGRST_APP_SETTINGS_JWT_EXP: 315360000
+    command: ["postgrest"]
+
+  storage:
+    image: supabase/storage-api:v1.48.26
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    environment:
+      <<: *supabase-keys
+      POSTGREST_URL: http://rest:3000
+      DATABASE_URL: postgres://supabase_storage_admin:postgres@supabase-db:5432/postgres
+      AUTH_JWT_SECRET: afhub-local-jwt-secret-change-only-for-dev-2026
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      STORAGE_PUBLIC_URL: http://localhost:54321/storage/v1
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: 52428800
+      GLOBAL_S3_BUCKET: stub
+      TENANT_ID: stub
+      REGION: local
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage_data:/var/lib/storage
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5000/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  meta:
+    image: supabase/postgres-meta:v0.96.3
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: supabase-db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: postgres
+
+  studio:
+    image: supabase/studio:2026.04.27-sha-5f60601
+    depends_on:
+      meta:
+        condition: service_started
+      kong:
+        condition: service_healthy
+    ports:
+      - "54323:3000"
+    environment:
+      HOSTNAME: 0.0.0.0
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: postgres
+      DEFAULT_ORGANIZATION_NAME: AFHUB Local
+      DEFAULT_PROJECT_NAME: AFHUB
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: http://localhost:54321
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaHViLWxvY2FsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAwMDAwMDAsImV4cCI6NDA3MDkwODgwMH0.lak2dIWNDCkdjH1FNokuu5yHfEPZeeCYzQNN8Zsoxi4}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFmaHViLWxvY2FsIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MDAwMDAwMCwiZXhwIjo0MDcwOTA4ODAwfQ.MpKaamg6se5t-re0ShV9T95_gyhnOkIlToK0xE_CYTg}
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+
+  kong:
+    image: kong/kong:3.9.1
+    depends_on:
+      auth:
+        condition: service_healthy
+      rest:
+        condition: service_started
+      storage:
+        condition: service_healthy
+    ports:
+      - "54321:8000"
+    volumes:
+      - ./supabase/local/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/declarative/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  supabase_data:
+  storage_data:

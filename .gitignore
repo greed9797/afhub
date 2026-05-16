@@ -41,6 +41,8 @@ public/agent-uploads/*
 .env
 .env.*
 !.env.example
+!.env.local.example
+!affiliate-engine/.env.local.example
 
 # Playwright
 /playwright-report/

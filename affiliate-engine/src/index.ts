@@ -34,6 +34,13 @@ app.get('/health', (c) =>
 );
 
 const api = new Hono();
+api.get('/health', (c) =>
+  c.json({
+    ok: true,
+    service: 'affiliate-engine',
+    timestamp: new Date().toISOString(),
+  }),
+);
 app.route('/api/r', trackingRedirect);
 api.route('/accounts', accountsRoutes);
 api.route('/niches', nichesRoutes);

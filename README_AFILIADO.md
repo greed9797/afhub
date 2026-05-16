@@ -18,9 +18,35 @@ Sistema de automação de afiliados adicionado em módulos separados do `package
 npm install
 ```
 
-2. Configure `.env` na raiz e `affiliate-engine/.env` a partir dos exemplos.
+2. Para rodar 100% local sem Supabase CLI/Upstash, suba a infra Docker:
 
-3. Aplique a migration no Supabase:
+```bash
+npm run local:infra
+```
+
+Isso sobe:
+
+- Supabase API local em `http://localhost:54321`
+- Supabase Studio em `http://localhost:54323`
+- Postgres em `localhost:5432`
+- Redis em `localhost:6379`
+
+O compose local usa chaves JWT fixas de desenvolvimento. Copie os templates:
+
+```bash
+cp .env.local.example .env.local
+cp affiliate-engine/.env.local.example affiliate-engine/.env
+```
+
+3. Aplique as migrations do AfiliadoOS sem Supabase CLI:
+
+```bash
+npm run local:migrate
+```
+
+Por padrão esse comando aplica só o stack de afiliados: `001_initial_schema.sql`, `002_official_api_readiness.sql`, `003_helpers.sql` e `20260514000000_affiliate_analytics.sql`. Para tentar aplicar todo o monorepo local, use `MIGRATION_SCOPE=all npm run local:migrate`.
+
+Se preferir Supabase CLI, o fluxo antigo continua funcionando:
 
 ```bash
 supabase db push
@@ -128,6 +154,26 @@ curl -s http://localhost:3000/api/affiliate/products
 curl -s http://localhost:3000/api/affiliate/publications
 curl -s 'http://localhost:3000/api/affiliate/analytics/summary?from=2026-04-01&to=2026-04-30&account_id=all&platform=all'
 ```
+
+### Smoke 100% local sem cloud
+
+```bash
+npm run local:infra
+npm run local:migrate
+npm run affiliate:dev
+npm run dev
+
+curl http://localhost:3001/health
+curl http://localhost:3000/api/affiliate/health
+curl http://localhost:3000/api/affiliate/settings/readiness
+```
+
+Serviços que continuam exigindo credencial real mesmo localmente:
+
+- Vertex AI / Veo 3 (`GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_CLOUD_PROJECT`)
+- Gemini (`GOOGLE_AI_API_KEY`)
+- APIs de afiliado ML/Shopee/TikTok Shop
+- Telegram real, caso queira callback/notificação fora de teste
 
 ### Próximos passos práticos (após conectores oficiais)
 
