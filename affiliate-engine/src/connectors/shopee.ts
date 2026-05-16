@@ -110,7 +110,7 @@ export class ShopeeConnector implements PlatformConnector {
     const payload = JSON.stringify({
       query: `
         mutation GenerateShortLink($originUrl: String!, $subIds: [String!]) {
-          generateShortLink(originUrl: $originUrl, subIds: $subIds) {
+          generateShortLink(input: { originUrl: $originUrl, subIds: $subIds }) {
             shortLink
           }
         }

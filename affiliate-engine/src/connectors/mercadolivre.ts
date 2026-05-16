@@ -30,6 +30,14 @@ type MercadoLivreSearchResponse = {
 };
 
 const platform: AffiliatePlatform = 'mercadolivre';
+let lastMercadoLivreRequestAt = 0;
+
+async function throttleMercadoLivre(): Promise<void> {
+  const minIntervalMs = Number(process.env.ML_MIN_REQUEST_INTERVAL_MS ?? 3600);
+  const wait = Math.max(0, lastMercadoLivreRequestAt + minIntervalMs - Date.now());
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+  lastMercadoLivreRequestAt = Date.now();
+}
 
 export class MercadoLivreConnector implements PlatformConnector {
   async search(keywords: string[], filters: Filters): Promise<RawProduct[]> {
@@ -37,9 +45,10 @@ export class MercadoLivreConnector implements PlatformConnector {
     const url = `https://api.mercadolibre.com/sites/MLB/search?q=${query}&limit=50`;
 
     return withRetry(async () => {
+      await throttleMercadoLivre();
       const data = await fetchJson<MercadoLivreSearchResponse>(url, { method: 'GET' }, 'Mercado Livre search');
-      return (data.results ?? [])
-        .map((item) => this.mapSearchItem(item))
+      const mapped = await Promise.all((data.results ?? []).map((item) => this.mapSearchItem(item)));
+      return mapped
         .filter((product) => this.passesFilters(product, filters));
     }, 'Mercado Livre search');
   }
@@ -83,9 +92,9 @@ export class MercadoLivreConnector implements PlatformConnector {
   }
 
   async generateAffiliateLink(accountId: string, productId: string): Promise<AffiliateLinkResult> {
-    const tokens = await loadAccountTokens(accountId, platform);
     const officialEndpoint = process.env.ML_AFFILIATE_LINK_API_URL;
     if (officialEndpoint) {
+      const tokens = await loadAccountTokens(accountId, platform);
       const data = await withRetry(
         () =>
           fetchJson<Record<string, unknown>>(
@@ -116,7 +125,9 @@ export class MercadoLivreConnector implements PlatformConnector {
       return {
         url: template
           .replaceAll('{productId}', encodeURIComponent(productId))
-          .replaceAll('{affiliateTag}', encodeURIComponent(affiliateTag)),
+          .replaceAll('{affiliateTag}', encodeURIComponent(affiliateTag))
+          .replaceAll('{url}', encodeURIComponent(`https://www.mercadolivre.com.br/p/${productId}`))
+          .replaceAll('{tag}', encodeURIComponent(affiliateTag)),
         method: 'tracked_url_builder',
       };
     }
@@ -128,11 +139,13 @@ export class MercadoLivreConnector implements PlatformConnector {
     );
   }
 
-  private mapSearchItem(item: MercadoLivreSearchItem): RawProduct {
+  private async mapSearchItem(item: MercadoLivreSearchItem): Promise<RawProduct> {
     const images = [
       ...(item.pictures ?? []).map((picture) => picture.secure_url || picture.url).filter(Boolean),
       item.thumbnail,
     ].filter(Boolean) as string[];
+
+    const commission = await this.lookupCommission(item.id);
 
     return {
       productId: item.id,
@@ -141,19 +154,40 @@ export class MercadoLivreConnector implements PlatformConnector {
       descricao: item.title ?? '',
       preco: Number(item.price ?? 0),
       imagens: [...new Set(images)],
-      comissaoPercent: Number(process.env.ML_DEFAULT_COMMISSION_PERCENT ?? 5),
+      comissaoPercent: commission.percent,
       vendasMes: Number(item.sold_quantity ?? 0),
       avaliacao: 4.5,
       productUrl: `https://www.mercadolivre.com.br/p/${item.id}`,
       sourceApi: 'mercadolivre_items_search',
       affiliabilityStatus: 'unknown',
-      commissionSource: 'estimated',
+      commissionSource: commission.source,
       sellerMetricsSource: 'mercadolivre_search',
       rawData: {
         ...item,
-        comissao_estimada: true,
+        comissao_estimada: commission.source === 'estimated',
       },
     };
+  }
+
+  private async lookupCommission(productId: string): Promise<{ percent: number; source: 'official' | 'estimated' }> {
+    const fallback = Number(process.env.ML_DEFAULT_COMMISSION_PERCENT ?? 5);
+    const url = process.env.ML_COMMISSION_API_URL;
+    if (!url) return { percent: fallback, source: 'estimated' };
+    try {
+      await throttleMercadoLivre();
+      const data = await fetchJson<Record<string, unknown>>(
+        `${url}${url.includes('?') ? '&' : '?'}item_id=${encodeURIComponent(productId)}`,
+        { method: 'GET' },
+        'Mercado Livre commission lookup',
+      );
+      const percent = Number(data.commission_percent ?? data.comissao_percent ?? data.percent ?? fallback);
+      return { percent: Number.isFinite(percent) && percent > 0 ? percent : fallback, source: 'official' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('403')) return { percent: fallback, source: 'estimated' };
+      console.warn(`[mercadolivre] commission lookup failed for ${productId}: ${message}`);
+      return { percent: fallback, source: 'estimated' };
+    }
   }
 
   private passesFilters(product: RawProduct, filters: Filters): boolean {

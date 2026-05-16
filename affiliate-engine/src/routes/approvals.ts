@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { getSupabase } from '../lib/supabase.js';
-import { processDecision } from '../services/approval.js';
+import { processBatchDecision, processDecision } from '../services/approval.js';
 
 const approvals = new Hono();
 
@@ -34,10 +34,8 @@ approvals.post('/batch', async (c) => {
   if (!Array.isArray(body.ids) || !body.decision) {
     return c.json({ error: 'ids[] and decision are required.' }, 400);
   }
-  for (const id of body.ids) {
-    await processDecision(id, body.decision, 'web');
-  }
-  return c.json({ ok: true, count: body.ids.length });
+  const result = await processBatchDecision(body.ids, body.decision);
+  return c.json({ ok: result.failed === 0, ...result });
 });
 
 export default approvals;

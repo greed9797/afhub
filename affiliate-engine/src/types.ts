@@ -8,6 +8,7 @@ export type VideoJobStatus = 'queued' | 'generating' | 'done' | 'failed';
 export type AffiliabilityStatus = 'affiliable' | 'not_affiliable' | 'unknown' | 'blocked';
 export type CommissionSource = 'official' | 'estimated' | 'unavailable';
 export type LinkGenerationMethod = 'official_api' | 'tracked_url_builder' | 'platform_short_link';
+export type AffiliatedProductStatus = 'active' | 'paused' | 'expired' | 'pending_manual';
 
 export interface AccountCapabilities {
   can_scan?: boolean;
@@ -79,5 +80,5 @@ export interface AffiliatedProduct {
   platform: AffiliatePlatform;
   link_generation_method?: LinkGenerationMethod | null;
   imagens_storage: string[] | null;
-  status: 'active' | 'paused' | 'expired';
+  status: AffiliatedProductStatus;
 }

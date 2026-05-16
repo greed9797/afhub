@@ -37,7 +37,10 @@ export function buildTikTokShopSignature(params: {
 
 export class TikTokShopCommerceConnector implements PlatformConnector {
   async search(keywords: string[], filters: Filters): Promise<RawProduct[]> {
-    const path = process.env.TIKTOK_SHOP_PRODUCT_SEARCH_PATH ?? '/product/202309/products/search';
+    const path = process.env.TIKTOK_SHOP_PRODUCT_SEARCH_PATH;
+    if (!path) {
+      throw new ConnectorAccessError('TIKTOK_SHOP_PRODUCT_SEARCH_PATH is not configured for product search.', platform, 'missing');
+    }
     const body = JSON.stringify({ keyword: keywords.join(' '), page_size: 50 });
     const token = process.env.TIKTOK_SHOP_ACCESS_TOKEN ?? (await loadFirstPlatformTokens(platform))?.access_token;
     if (!token) {

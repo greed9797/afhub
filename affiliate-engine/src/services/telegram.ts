@@ -36,12 +36,14 @@ async function telegramFetch(method: string, body: Record<string, unknown>): Pro
 
 export async function sendProductApprovalCard(candidate: ProductCandidate): Promise<void> {
   const caption = [
-    `Produto: ${candidate.nome}`,
-    `Plataforma: ${candidate.platform}`,
-    `Comissão: ${candidate.comissao_percent ?? 0}%`,
-    `Vendas/mês: ${candidate.vendas_mes ?? 0}`,
+    'Novo produto para aprovação',
+    '',
+    `${candidate.nome.slice(0, 120)}`,
+    `Plataforma: ${candidate.platform.toUpperCase()}`,
+    `Comissão: ${candidate.comissao_percent ?? 0}%${candidate.commission_source === 'estimated' ? ' (estimada)' : ''}`,
+    `Vendas/mês: ${(candidate.vendas_mes ?? 0).toLocaleString('pt-BR')}`,
     `Avaliação: ${candidate.avaliacao ?? 0}`,
-    `Score: ${candidate.score ?? 0}`,
+    `Score: ${candidate.score ?? 0}/100`,
   ].join('\n');
 
   const reply_markup = {
@@ -59,6 +61,7 @@ export async function sendProductApprovalCard(candidate: ProductCandidate): Prom
       chat_id: process.env.TELEGRAM_CHAT_ID,
       photo: image,
       caption,
+      parse_mode: 'HTML',
       reply_markup,
     });
     return;
@@ -67,6 +70,7 @@ export async function sendProductApprovalCard(candidate: ProductCandidate): Prom
   await telegramFetch('sendMessage', {
     chat_id: process.env.TELEGRAM_CHAT_ID,
     text: caption,
+    parse_mode: 'HTML',
     reply_markup,
   });
 }
@@ -77,7 +81,7 @@ export async function sendScanSummary(nicheNome: string, total: number, byPlatfo
     .join('\n');
   await telegramFetch('sendMessage', {
     chat_id: process.env.TELEGRAM_CHAT_ID,
-    text: `Scan finalizado: ${nicheNome}\nTotal: ${total}\n${platformLines}`,
+    text: `Scan concluído - ${nicheNome}\n\nTotal: ${total} produtos\n${platformLines}\n\nAcesse /dashboard/approvals para aprovar.`,
   });
 }
 
@@ -92,11 +96,13 @@ export async function handleCallbackQuery(callbackQuery: TelegramCallbackQuery):
       chat_id: callbackQuery.message.chat.id,
       message_id: callbackQuery.message.message_id,
       caption: `Produto ${action === 'approve' ? 'aprovado' : 'rejeitado'} pelo Telegram.`,
+      reply_markup: { inline_keyboard: [[{ text: action === 'approve' ? 'Aprovado' : 'Rejeitado', callback_data: 'done' }]] },
     }).catch(async () => {
       await telegramFetch('editMessageText', {
         chat_id: callbackQuery.message?.chat?.id,
         message_id: callbackQuery.message?.message_id,
         text: `Produto ${action === 'approve' ? 'aprovado' : 'rejeitado'} pelo Telegram.`,
+        reply_markup: { inline_keyboard: [[{ text: action === 'approve' ? 'Aprovado' : 'Rejeitado', callback_data: 'done' }]] },
       });
     });
   }

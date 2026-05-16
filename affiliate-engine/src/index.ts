@@ -16,6 +16,7 @@ import { internalAuth } from './middleware/auth.js';
 import { rateLimit } from './middleware/rate-limit.js';
 import { closeQueues } from './lib/queues.js';
 import { startOAuthRefreshScheduler } from './services/oauth.js';
+import { runPublishCron } from './workers/publish-cron.js';
 
 const app = new Hono();
 
@@ -54,12 +55,20 @@ app.onError((error, c) => {
 
 const port = Number(process.env.PORT ?? 3001);
 const refreshTimer = startOAuthRefreshScheduler();
+const publishCronTimer = process.env.PUBLISH_CRON_ENABLED === 'true'
+  ? setInterval(() => {
+      runPublishCron().catch((error) => {
+        console.error('[publish-cron] sweep failed:', error instanceof Error ? error.message : error);
+      });
+    }, 5 * 60 * 1000)
+  : undefined;
 const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`[affiliate-engine] listening on http://localhost:${info.port}`);
 });
 
 async function shutdown(code = 0): Promise<void> {
   clearInterval(refreshTimer);
+  if (publishCronTimer) clearInterval(publishCronTimer);
   await closeQueues().catch((error) => console.error('[shutdown] queue close failed:', error));
   server.close((error) => {
     if (error) {

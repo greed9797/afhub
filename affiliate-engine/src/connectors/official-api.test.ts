@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { test } from 'node:test';
-import { buildMercadoLivreOAuthUrl } from './mercadolivre.js';
+import { buildMercadoLivreOAuthUrl, MercadoLivreConnector } from './mercadolivre.js';
 import { buildShopeeAffiliateAuthorization } from './shopee.js';
 import { buildTikTokShopSignature } from './tiktokshop.js';
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (typeof value === 'undefined') {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+}
 
 test('Shopee Affiliate authorization signs the exact JSON payload', () => {
   const payload = JSON.stringify({
@@ -62,4 +70,23 @@ test('Mercado Livre OAuth uses fixed redirect URI and transports account in stat
   assert.equal(url.searchParams.get('redirect_uri'), 'https://example.com/api/accounts/oauth/callback');
   assert.equal(url.searchParams.get('state'), 'account-abc');
   assert.equal(url.searchParams.get('response_type'), 'code');
+});
+
+test('Mercado Livre tracked template supports url/tag placeholders without OAuth tokens', async () => {
+  const previousTemplate = process.env.ML_TRACKED_URL_TEMPLATE;
+  const previousTag = process.env.ML_AFFILIATE_TAG;
+  const previousOfficial = process.env.ML_AFFILIATE_LINK_API_URL;
+  process.env.ML_TRACKED_URL_TEMPLATE = 'https://track.example/out?u={url}&tag={tag}';
+  process.env.ML_AFFILIATE_TAG = 'afhub';
+  delete process.env.ML_AFFILIATE_LINK_API_URL;
+
+  try {
+    const result = await new MercadoLivreConnector().generateAffiliateLink('account-without-token', 'MLB123');
+    assert.equal(result.method, 'tracked_url_builder');
+    assert.equal(result.url, 'https://track.example/out?u=https%3A%2F%2Fwww.mercadolivre.com.br%2Fp%2FMLB123&tag=afhub');
+  } finally {
+    restoreEnv('ML_TRACKED_URL_TEMPLATE', previousTemplate);
+    restoreEnv('ML_AFFILIATE_TAG', previousTag);
+    restoreEnv('ML_AFFILIATE_LINK_API_URL', previousOfficial);
+  }
 });

@@ -27,7 +27,6 @@ export async function processDecision(
     .update({
       status: decision,
       reviewed_at: new Date().toISOString(),
-      raw_data: undefined,
     })
     .eq('id', candidateId)
     .select('id, status')
@@ -47,4 +46,22 @@ export async function processDecision(
       },
     );
   }
+}
+
+export async function processBatchDecision(
+  candidateIds: string[],
+  decision: 'approved' | 'rejected',
+): Promise<{ success: number; failed: number }> {
+  let success = 0;
+  let failed = 0;
+  for (const id of candidateIds) {
+    try {
+      await processDecision(id, decision, 'web');
+      success += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`[approval] batch ${decision} failed for ${id}:`, error instanceof Error ? error.message : error);
+    }
+  }
+  return { success, failed };
 }

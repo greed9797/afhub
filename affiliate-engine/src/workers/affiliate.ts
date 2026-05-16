@@ -43,13 +43,33 @@ async function processAffiliateJob(candidateId: string): Promise<void> {
   }
 
   const candidate = data as ProductCandidate;
+  if (candidate.status !== 'approved') {
+    throw new Error(`Candidate ${candidateId} is not approved. Current status: ${candidate.status}`);
+  }
   if (!candidate.niche_id) {
     throw new Error(`Candidate ${candidateId} has no niche_id.`);
   }
 
   const account = await selectAccount(candidate.platform, candidate.niche_id);
   const connector = connectorFor(candidate.platform);
-  const affiliateLink = await connector.affiliate(account.id, candidate.product_id);
+  let affiliateLink;
+  try {
+    affiliateLink = await connector.affiliate(account.id, candidate.product_id);
+  } catch (error) {
+    const fallbackLink = String(candidate.raw_data?.productUrl ?? candidate.raw_data?.permalink ?? candidate.raw_data?.url ?? '');
+    if (fallbackLink) {
+      await getSupabase().from('affiliated_products').insert({
+        account_id: account.id,
+        candidate_id: candidate.id,
+        affiliate_link: fallbackLink,
+        platform: candidate.platform,
+        link_generation_method: null,
+        imagens_storage: [],
+        status: 'pending_manual',
+      });
+    }
+    throw error;
+  }
   const imagensStorage = await downloadAndStoreImages(candidate);
 
   const { data: affiliated, error: insertError } = await getSupabase()

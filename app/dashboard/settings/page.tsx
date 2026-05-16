@@ -7,8 +7,12 @@ import { Card, PageHeader } from '../_components/DashboardChrome';
 
 type EnvStatus = { key: string; configured: boolean };
 type Readiness = {
+  account_id?: string;
+  account_name?: string;
   platform: string;
   country_code: string;
+  account_status?: string;
+  token_configured?: boolean;
   api_access_status: string;
   capabilities: Record<string, boolean>;
   required_env: string[];
@@ -73,14 +77,19 @@ export default function SettingsPage() {
         <h2 className="mb-3 font-bold">API Readiness</h2>
         <div className="grid gap-3 lg:grid-cols-3">
           {readiness.map((item) => (
-            <div key={item.platform} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
+            <div key={item.account_id ?? item.platform} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
               <div className="mb-2 flex items-center justify-between">
-                <span className="font-semibold capitalize">{item.platform}</span>
+                <span className="font-semibold capitalize">{item.account_name ?? item.platform}</span>
                 <span className={`rounded-full px-2 py-1 text-xs ${item.api_access_status === 'approved' ? 'bg-emerald-500/15 text-emerald-300' : item.api_access_status === 'missing' ? 'bg-red-500/15 text-red-300' : 'bg-amber-500/15 text-amber-300'}`}>
                   {item.api_access_status}
                 </span>
               </div>
-              <p className="mb-2 text-xs text-zinc-500">País padrão: {item.country_code}</p>
+              <p className="mb-2 text-xs text-zinc-500">
+                {item.platform} · {item.country_code}{item.account_status ? ` · ${item.account_status}` : ''}
+              </p>
+              {typeof item.token_configured === 'boolean' ? (
+                <p className="mb-2 text-xs text-zinc-400">OAuth: {item.token_configured ? 'conectado' : 'pendente'}</p>
+              ) : null}
               <div className="mb-3 grid gap-1 text-xs text-zinc-300">
                 {Object.entries(item.capabilities).map(([key, value]) => (
                   <span key={key} className="flex items-center justify-between">

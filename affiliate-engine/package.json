@@ -10,7 +10,8 @@
     "start": "node dist/index.js",
     "worker:affiliate": "tsx src/workers/affiliate.ts",
     "worker:video": "tsx src/workers/video-generation.ts",
-    "worker:publisher": "tsx src/workers/publisher.ts"
+    "worker:publisher": "tsx src/workers/publisher.ts",
+    "worker:publish-cron": "tsx src/workers/publish-cron.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.4",

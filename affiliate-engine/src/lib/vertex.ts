@@ -26,6 +26,25 @@ async function accessToken(): Promise<string> {
   return token.token;
 }
 
+async function downloadGcsUri(uri: string): Promise<string> {
+  const match = uri.match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (!match) throw new Error(`Invalid GCS URI returned by Vertex: ${uri}`);
+  const [, bucket, objectPath] = match;
+  const response = await fetch(
+    `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(objectPath)}?alt=media`,
+    {
+      headers: {
+        Authorization: `Bearer ${await accessToken()}`,
+      },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Vertex GCS download failed ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return `data:video/mp4;base64,${buffer.toString('base64')}`;
+}
+
 async function imageToBase64(url: string): Promise<string> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Could not fetch reference image: ${response.status}`);
@@ -92,6 +111,9 @@ export async function pollVeoOperation(operationName: string): Promise<string | 
   const base64 = first?.bytesBase64Encoded ?? first?.videoBytes ?? first?.bytes_base64_encoded;
   if (base64) return `data:video/mp4;base64,${String(base64)}`;
   const uri = first?.gcsUri ?? first?.gcs_uri ?? first?.videoUri ?? first?.uri;
-  if (uri) return String(uri);
+  if (uri) {
+    const value = String(uri);
+    return value.startsWith('gs://') ? downloadGcsUri(value) : value;
+  }
   throw new Error('Vertex Veo completed but did not include video bytes or URI.');
 }
